@@ -1,10 +1,11 @@
 import React, { useState } from 'react'
-import { SchemaMeta } from '../types'
+import { SchemaMeta, DiagnosticRecord } from '../types'
 import { DiffViewer } from './DiffViewer'
-import { Play, Sparkles, AlertCircle, RefreshCw } from 'lucide-react'
+import { Play, Sparkles, AlertCircle, RefreshCw, FileCode, Check, Database } from 'lucide-react'
 
 interface SchemaPlaygroundProps {
   schemas: SchemaMeta[]
+  onSchemaAdded?: () => void
 }
 
 const PRESETS: { label: string; value: string; schema?: string }[] = [
@@ -43,14 +44,20 @@ Let me know if you would like me to adjust the fields!`,
   },
 ]
 
-export const SchemaPlayground: React.FC<SchemaPlaygroundProps> = ({ schemas }) => {
+export const SchemaPlayground: React.FC<SchemaPlaygroundProps> = ({ schemas, onSchemaAdded }) => {
   const [input, setInput] = useState<string>(PRESETS[0].value)
   const [selectedSchema, setSelectedSchema] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
+  const [inferring, setInferring] = useState<boolean>(false)
+  const [inferredSchema, setInferredSchema] = useState<any | null>(null)
+  const [schemaNameInput, setSchemaNameInput] = useState<string>('auto_inferred_schema')
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
+
   const [result, setResult] = useState<{
     repaired: string
     valid: boolean
     flags: any
+    diagnostics?: DiagnosticRecord[]
     latency_us: number
     tokens_saved: number
   } | null>(null)
@@ -65,6 +72,7 @@ export const SchemaPlayground: React.FC<SchemaPlaygroundProps> = ({ schemas }) =
     }
     setResult(null)
     setError(null)
+    setInferredSchema(null)
   }
 
   const handleRunRepair = async () => {
@@ -90,6 +98,53 @@ export const SchemaPlayground: React.FC<SchemaPlaygroundProps> = ({ schemas }) =
       setError(err.message || 'Repair request failed')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleInferSchema = async () => {
+    setInferring(true)
+    setError(null)
+    setSaveSuccess(null)
+    try {
+      const resp = await fetch('/api/schemas/infer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: input,
+          title: 'InferredSchema',
+        }),
+      })
+
+      if (!resp.ok) {
+        throw new Error('Failed to infer JSON schema')
+      }
+
+      const data = await resp.json()
+      setInferredSchema(data.schema)
+    } catch (err: any) {
+      setError(err.message || 'Failed to infer schema')
+    } finally {
+      setInferring(false)
+    }
+  }
+
+  const handleSaveInferredSchema = async () => {
+    if (!inferredSchema || !schemaNameInput.trim()) return
+    try {
+      const resp = await fetch('/api/schemas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: schemaNameInput.trim(),
+          schema: inferredSchema,
+        }),
+      })
+      if (!resp.ok) throw new Error('Failed to register schema')
+      setSaveSuccess(`Schema "${schemaNameInput.trim()}" successfully registered!`)
+      if (onSchemaAdded) onSchemaAdded()
+      setTimeout(() => setSaveSuccess(null), 3000)
+    } catch (e: any) {
+      setError(e.message)
     }
   }
 
@@ -139,6 +194,21 @@ export const SchemaPlayground: React.FC<SchemaPlaygroundProps> = ({ schemas }) =
               ))}
             </select>
 
+            {/* Infer Schema Button */}
+            <button
+              onClick={handleInferSchema}
+              disabled={inferring || !input.trim()}
+              className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-medium text-xs px-3.5 py-2 rounded-lg transition-colors border border-slate-700 shadow-sm"
+              title="Automatically generate a JSON Schema from this payload"
+            >
+              {inferring ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
+              ) : (
+                <FileCode className="w-3.5 h-3.5 text-blue-400" />
+              )}
+              <span>Infer Schema</span>
+            </button>
+
             {/* Run Button */}
             <button
               onClick={handleRunRepair}
@@ -155,6 +225,51 @@ export const SchemaPlayground: React.FC<SchemaPlaygroundProps> = ({ schemas }) =
           </div>
         </div>
       </div>
+
+      {/* Inferred Schema Drawer */}
+      {inferredSchema && (
+        <div className="bg-slate-900 border border-blue-500/30 rounded-xl p-4 shadow-lg space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-2">
+              <Database className="w-4 h-4 text-blue-400" />
+              <span className="text-xs font-semibold text-white">Auto-Inferred JSON Schema</span>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={schemaNameInput}
+                onChange={(e) => setSchemaNameInput(e.target.value)}
+                placeholder="Schema identifier name"
+                className="bg-slate-950 border border-slate-800 text-xs px-2.5 py-1.5 rounded-lg text-slate-200 font-mono focus:outline-none focus:border-blue-500"
+              />
+              <button
+                onClick={handleSaveInferredSchema}
+                className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors font-medium shadow-sm"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Save to Registry</span>
+              </button>
+              <button
+                onClick={() => setInferredSchema(null)}
+                className="text-xs text-slate-400 hover:text-white px-2 py-1"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+
+          {saveSuccess && (
+            <div className="text-xs text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg">
+              {saveSuccess}
+            </div>
+          )}
+
+          <pre className="bg-slate-950 border border-slate-800 p-3 rounded-lg text-xs font-mono text-slate-300 max-h-[180px] overflow-y-auto">
+            {JSON.stringify(inferredSchema, null, 2)}
+          </pre>
+        </div>
+      )}
 
       {/* Editor & Diff grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -189,6 +304,7 @@ export const SchemaPlayground: React.FC<SchemaPlaygroundProps> = ({ schemas }) =
               original={input}
               repaired={result.repaired}
               flags={typeof result.flags === 'object' ? Object.keys(result.flags).filter(k => result.flags[k]).join(', ') : undefined}
+              diagnostics={result.diagnostics}
               latencyUs={result.latency_us}
               tokensSaved={result.tokens_saved}
             />

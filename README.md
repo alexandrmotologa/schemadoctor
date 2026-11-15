@@ -23,12 +23,17 @@ schemadoctor repairs these syntax defects deterministically in under 3 microseco
 ## Key Capabilities
 
 - Streaming SSE balance: Intercepts Server-Sent Events token chunks and injects closing delimiters before `data: [DONE]`.
+- Tool calling and function arguments repair: Automatically heals stringified JSON arguments inside OpenAI `tool_calls` and Anthropic `tool_use` blocks.
 - Delimiter stack balancer: Tracks nested object and array depth to close truncated JSON structures upon EOF.
 - Markdown and chatter stripping: Removes conversational preambles and markdown code fences without regex overhead.
 - Unescaped quote normalization: Escapes double quotes inside nested string values.
 - Schema type coercion: Automatically coerces string numbers, string booleans, and singletons to match target JSON Schema definitions.
-- Low overhead: Operates in less than 15MB of resident memory with less than 0.003ms of added wire latency.
-- Embedded studio: Includes an embedded React 19 dashboard for live stream inspection, diff analysis, and schema management.
+- Automatic schema inference: Generates standard JSON Schemas directly from example JSON outputs.
+- Lexical audit trail: Explains repairs with line and column numbers, applied rules, and actions.
+- Multi-provider routing: Routes across OpenAI, Anthropic, and Ollama through path prefixes or `X-SchemaDoctor-Upstream` headers.
+- Prometheus exporter: Native `/metrics` endpoint for Grafana and Prometheus monitoring.
+- Low overhead: Operates in less than 15MB of resident memory with less than 0.004ms of added wire latency.
+- Embedded studio: Includes an embedded React 19 dashboard with live monitoring, traffic simulation, diff analysis, and schema management.
 - Pure Go binary: Uses `modernc.org/sqlite` for zero-CGO persistence across Linux, macOS, and Windows.
 
 ## Performance

@@ -39,10 +39,13 @@ func NewAPIServer(reg *schema.Registry, store *telemetry.Store, metrics *telemet
 // RegisterRoutes mounts all API routes onto the provided ServeMux.
 func (s *APIServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/metrics", s.handlePrometheusMetrics)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/repair", s.handleRepair)
 	mux.HandleFunc("/api/schemas", s.handleSchemas)
+	mux.HandleFunc("/api/schemas/infer", s.handleInferSchema)
+	mux.HandleFunc("/api/simulate", s.handleSimulateTraffic)
 	mux.HandleFunc("/api/stream", s.handleStream)
 }
 
@@ -53,6 +56,12 @@ func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"uptime_seconds": time.Since(s.StartTime).Seconds(),
 		"version":        "1.0.0",
 	})
+}
+
+func (s *APIServer) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(s.Metrics.FormatPrometheus()))
 }
 
 func (s *APIServer) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +135,7 @@ func (s *APIServer) handleRepair(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	repairedBytes, flags, valid, coercedCount := s.Interceptor.RepairRawPayload([]byte(req.Input), req.Schema)
+	repairedBytes, flags, valid, coercedCount, diags := s.Interceptor.RepairRawPayload([]byte(req.Input), req.Schema)
 	latencyUs := time.Since(start).Microseconds()
 
 	tokensSaved := int64(0)
@@ -171,6 +180,7 @@ func (s *APIServer) handleRepair(w http.ResponseWriter, r *http.Request) {
 		"valid":         valid,
 		"repaired":      string(repairedBytes),
 		"flags":         flags,
+		"diagnostics":   diags,
 		"coerced_count": coercedCount,
 		"latency_us":    latencyUs,
 		"tokens_saved":  tokensSaved,
@@ -223,6 +233,156 @@ func (s *APIServer) handleSchemas(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *APIServer) handleInferSchema(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Input string `json:"input"`
+		Title string `json:"title"`
+	}
+
+	rawPayload := bodyBytes
+	if err := json.Unmarshal(bodyBytes, &req); err == nil && req.Input != "" {
+		rawPayload = []byte(req.Input)
+	}
+
+	// First repair if malformed
+	healedRes := ast.Repair(rawPayload)
+	inferred, err := schema.InferSchema(healedRes.Repaired, req.Title)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to infer schema: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"title":    req.Title,
+		"schema":   inferred,
+		"repaired": string(healedRes.Repaired),
+	})
+}
+
+func (s *APIServer) handleSimulateTraffic(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	simulatedSamples := []struct {
+		model    string
+		provider string
+		raw      string
+	}{
+		{
+			model:    "gpt-4o-mini",
+			provider: "openai",
+			raw:      `{"status": "success", "results": [{"id": 1, "title": "Setup pipeline"}, {"id": 2, "title": "Configure proxy"`,
+		},
+		{
+			model:    "claude-3-5-sonnet",
+			provider: "anthropic",
+			raw:      "Here is the service configuration JSON:\n```json\n{\n  \"service\": \"auth-core\",\n  \"active\": True,\n  \"endpoints\": [\"/login\", \"/token\", ],\n}\n```\nHope this helps!",
+		},
+		{
+			model:    "llama-3.2-3b",
+			provider: "ollama",
+			raw:      `{"user": "Alex", "review": "He said "The proxy latency is unbelievable" during testing", "rating": 5}`,
+		},
+		{
+			model:    "qwen-2.5-coder",
+			provider: "vllm",
+			raw:      `{"id": 404, "title": "NotFound", "metadata": , "tags": ["http", "error", ], }`,
+		},
+		{
+			model:    "mistral-nemo",
+			provider: "ollama",
+			raw:      `{"name": "Senior AI Architect", "age": "32", "score": "99.4", "active": "true", "tags": "golang"}`,
+		},
+	}
+
+	for i, sCase := range simulatedSamples {
+		start := time.Now()
+		traceID := fmt.Sprintf("sim-%d-%d", time.Now().UnixNano()%100000, i+1)
+
+		healedBytes, flags, valid, coercedCount, diags := s.Interceptor.RepairRawPayload([]byte(sCase.raw), "user_profile")
+		latencyUs := time.Since(start).Microseconds()
+		repaired := flags.Any() || coercedCount > 0
+
+		tokensSaved := int64(0)
+		if repaired {
+			tokensSaved = int64(len(sCase.raw)/4 + 100)
+		}
+
+		status := "valid"
+		if repaired {
+			status = "healed"
+		}
+		if !valid {
+			status = "failed"
+		}
+
+		evt := &telemetry.RepairEvent{
+			TraceID:        traceID,
+			Timestamp:      time.Now(),
+			Provider:       sCase.provider,
+			Model:          sCase.model,
+			Status:         status,
+			LatencyUs:      latencyUs,
+			TokensSaved:    tokensSaved,
+			OriginalSize:   len(sCase.raw),
+			RepairedSize:   len(healedBytes),
+			Flags:          flags.Summary(),
+			RawInput:       sCase.raw,
+			RepairedOutput: string(healedBytes),
+		}
+
+		if s.Store != nil {
+			_ = s.Store.InsertEvent(evt)
+		}
+		if s.Metrics != nil {
+			s.Metrics.Record(repaired, valid, latencyUs, tokensSaved,
+				flags.ClosedOpenString || flags.BalancedDelimiters,
+				flags.StrippedMarkdown,
+				flags.FixedUnescapedQuote,
+				flags.RemovedTrailingComma,
+				flags.CompletedDanglingKey,
+				coercedCount > 0,
+			)
+		}
+		if s.EventBus != nil {
+			s.EventBus.Publish(evt)
+		}
+		_ = diags
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"simulated_count": len(simulatedSamples),
+		"status":          "completed",
+		"message":         "Successfully sent 5 simulated malformed requests through proxy telemetry pipeline",
+	})
 }
 
 func (s *APIServer) handleStream(w http.ResponseWriter, r *http.Request) {

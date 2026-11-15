@@ -120,6 +120,7 @@ export const App: React.FC = () => {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         isConnected={isConnected}
+        onSimulate={() => { fetchStats(); fetchLogs(); }}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -131,7 +132,7 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'playground' && (
-          <SchemaPlayground schemas={schemas} />
+          <SchemaPlayground schemas={schemas} onSchemaAdded={fetchSchemas} />
         )}
 
         {activeTab === 'schemas' && (

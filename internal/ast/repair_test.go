@@ -213,3 +213,34 @@ func BenchmarkRepairMarkdown(b *testing.B) {
 		_ = Repair(input)
 	}
 }
+
+
+func TestRepairDiagnosticsAuditTrail(t *testing.T) {
+	input := []byte("```json\n{\"user\": \"Alex\", \"items\": [1, 2, ], \"comment\": \"He said \"hi\"\", \"meta\": \n")
+	res := Repair(input)
+	if !res.Valid {
+		t.Fatalf("expected valid JSON, got: %s", string(res.Repaired))
+	}
+
+	if len(res.Diagnostics) == 0 {
+		t.Fatalf("expected non-empty diagnostic records")
+	}
+
+	foundRules := make(map[string]bool)
+	for _, d := range res.Diagnostics {
+		foundRules[d.Rule] = true
+		if d.Line <= 0 || d.Column <= 0 {
+			t.Errorf("invalid line/column in diagnostic: %+v", d)
+		}
+	}
+
+	if !foundRules["stripped_markdown"] {
+		t.Errorf("missing stripped_markdown diagnostic")
+	}
+	if !foundRules["trailing_comma"] {
+		t.Errorf("missing trailing_comma diagnostic")
+	}
+	if !foundRules["dangling_key"] {
+		t.Errorf("missing dangling_key diagnostic")
+	}
+}

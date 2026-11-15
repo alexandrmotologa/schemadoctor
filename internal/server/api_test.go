@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -81,5 +82,22 @@ func TestAPIServerEndpoints(t *testing.T) {
 	resp, err = http.Get(ts.URL + "/api/logs")
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("logs query failed: %v", err)
+	}
+
+	// 6. Test /metrics Prometheus exposition
+	resp, err = http.Get(ts.URL + "/metrics")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics endpoint failed: %v", err)
+	}
+	metricsBody, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(metricsBody, []byte("schemadoctor_requests_total")) {
+		t.Errorf("expected schemadoctor_requests_total in /metrics")
+	}
+
+	// 7. Test /api/schemas/infer
+	inferReq := []byte(`{"input": "{\"title\": \"Task A\", \"done\": false, \"priority\": 2}", "title": "TaskSchema"}`)
+	resp, err = http.Post(ts.URL+"/api/schemas/infer", "application/json", bytes.NewReader(inferReq))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("schema infer endpoint failed: %v, status: %d", err, resp.StatusCode)
 	}
 }

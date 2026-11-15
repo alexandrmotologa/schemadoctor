@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"fmt"
 	"sync/atomic"
 )
 
@@ -118,4 +119,51 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
 		DanglingKeysFixed:    m.danglingKeysFixed.Load(),
 		TypeCoercions:        m.typeCoercions.Load(),
 	}
+}
+
+// FormatPrometheus exports cumulative counters in standard Prometheus text exposition format.
+func (m *Metrics) FormatPrometheus() string {
+	snap := m.Snapshot()
+
+	return fmt.Sprintf(`# HELP schemadoctor_requests_total Total number of requests intercepted by schemadoctor proxy
+# TYPE schemadoctor_requests_total counter
+schemadoctor_requests_total %d
+
+# HELP schemadoctor_repaired_requests_total Total number of requests healed by schemadoctor
+# TYPE schemadoctor_repaired_requests_total counter
+schemadoctor_repaired_requests_total %d
+
+# HELP schemadoctor_valid_passthrough_total Total number of valid requests passed through
+# TYPE schemadoctor_valid_passthrough_total counter
+schemadoctor_valid_passthrough_total %d
+
+# HELP schemadoctor_tokens_saved_total Total estimated LLM tokens saved by avoiding API retries
+# TYPE schemadoctor_tokens_saved_total counter
+schemadoctor_tokens_saved_total %d
+
+# HELP schemadoctor_repair_latency_microseconds Average latency of the AST repair engine in microseconds
+# TYPE schemadoctor_repair_latency_microseconds gauge
+schemadoctor_repair_latency_microseconds %.3f
+
+# HELP schemadoctor_errors_healed_total Cumulative count of syntax errors repaired by error category
+# TYPE schemadoctor_errors_healed_total counter
+schemadoctor_errors_healed_total{type="truncation"} %d
+schemadoctor_errors_healed_total{type="markdown"} %d
+schemadoctor_errors_healed_total{type="quotes"} %d
+schemadoctor_errors_healed_total{type="trailing_comma"} %d
+schemadoctor_errors_healed_total{type="dangling_key"} %d
+schemadoctor_errors_healed_total{type="type_coercion"} %d
+`,
+		snap.TotalRequests,
+		snap.RepairedRequests,
+		snap.ValidPassThrough,
+		snap.TokensSavedEstimated,
+		snap.AvgLatencyUs,
+		snap.TruncationFixed,
+		snap.MarkdownStripped,
+		snap.QuotesFixed,
+		snap.TrailingCommasFixed,
+		snap.DanglingKeysFixed,
+		snap.TypeCoercions,
+	)
 }

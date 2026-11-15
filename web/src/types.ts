@@ -1,3 +1,10 @@
+export interface DiagnosticRecord {
+  line: number
+  column: number
+  rule: string
+  description: string
+}
+
 export interface RepairFlags {
   stripped_markdown: boolean
   closed_open_string: boolean

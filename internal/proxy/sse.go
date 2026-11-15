@@ -39,6 +39,8 @@ func (h *Interceptor) HandleStreamingResponse(w http.ResponseWriter, upstreamRes
 	traceID := fmt.Sprintf("trc-sse-%s", uuid.New().String()[:8])
 
 	var accumulatedContent strings.Builder
+	var accumulatedToolArgs strings.Builder
+	var isToolCallStream = false
 	var lastChunkID = "chatcmpl-stream"
 	var lastModel = "llm-streaming"
 	var finishReason = ""
@@ -52,12 +54,34 @@ func (h *Interceptor) HandleStreamingResponse(w http.ResponseWriter, upstreamRes
 				payload := bytes.TrimPrefix(trimmedLine, []byte("data: "))
 
 				if bytes.Equal(payload, []byte("[DONE]")) {
-					// Stream completion reached. Check if accumulated content needs delimiter closure!
+					// Stream completion reached. Check if accumulated content or tool args need delimiter closure!
 					raw := accumulatedContent.String()
+					if isToolCallStream {
+						raw = accumulatedToolArgs.String()
+					}
+
 					if len(raw) > 0 && looksLikeJSON(raw) {
 						suffix := ast.CalculateClosingSuffix([]byte(raw))
 						if len(suffix) > 0 {
 							// Inject closing delta chunk before [DONE]
+							var deltaPayload map[string]interface{}
+							if isToolCallStream {
+								deltaPayload = map[string]interface{}{
+									"tool_calls": []map[string]interface{}{
+										{
+											"index": 0,
+											"function": map[string]string{
+												"arguments": string(suffix),
+											},
+										},
+									},
+								}
+							} else {
+								deltaPayload = map[string]interface{}{
+									"content": string(suffix),
+								}
+							}
+
 							injectChunk := map[string]interface{}{
 								"id":      lastChunkID,
 								"object":  "chat.completion.chunk",
@@ -65,10 +89,8 @@ func (h *Interceptor) HandleStreamingResponse(w http.ResponseWriter, upstreamRes
 								"model":   lastModel,
 								"choices": []map[string]interface{}{
 									{
-										"index": 0,
-										"delta": map[string]string{
-											"content": string(suffix),
-										},
+										"index":         0,
+										"delta":         deltaPayload,
 										"finish_reason": "length_healed",
 									},
 								},
@@ -127,7 +149,13 @@ func (h *Interceptor) HandleStreamingResponse(w http.ResponseWriter, upstreamRes
 					Model   string `json:"model"`
 					Choices []struct {
 						Delta struct {
-							Content string `json:"content"`
+							Content   string `json:"content"`
+							ToolCalls []struct {
+								Index    int `json:"index"`
+								Function struct {
+									Arguments string `json:"arguments"`
+								} `json:"function"`
+							} `json:"tool_calls"`
 						} `json:"delta"`
 						FinishReason string `json:"finish_reason"`
 					} `json:"choices"`
@@ -141,9 +169,16 @@ func (h *Interceptor) HandleStreamingResponse(w http.ResponseWriter, upstreamRes
 						lastModel = chunk.Model
 					}
 					if len(chunk.Choices) > 0 {
-						accumulatedContent.WriteString(chunk.Choices[0].Delta.Content)
-						if chunk.Choices[0].FinishReason != "" {
-							finishReason = chunk.Choices[0].FinishReason
+						choice := chunk.Choices[0]
+						if choice.Delta.Content != "" {
+							accumulatedContent.WriteString(choice.Delta.Content)
+						}
+						if len(choice.Delta.ToolCalls) > 0 {
+							isToolCallStream = true
+							accumulatedToolArgs.WriteString(choice.Delta.ToolCalls[0].Function.Arguments)
+						}
+						if choice.FinishReason != "" {
+							finishReason = choice.FinishReason
 						}
 					}
 				}

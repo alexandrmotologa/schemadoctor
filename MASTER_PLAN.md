@@ -213,3 +213,11 @@ schemadoctor/
 - [x] Write exhaustive unit and integration tests across AST, schema, telemetry, proxy, and server packages.
 - [x] Benchmark proxy overhead to ensure added processing latency remains under 1ms per request (achieved ~2.5 microseconds, 400x faster than budget).
 - [x] Author humanized README with quick-start guides, curl examples, and LangChain/OpenAI SDK integration snippets.
+
+### Phase 8: Production Engineering Enhancements [COMPLETED]
+- [x] Tool Calling & Function Arguments Auto-Repair: Intercepts and repairs stringified JSON arguments in OpenAI `tool_calls` and Anthropic `tool_use` blocks.
+- [x] Lexical Audit Trail ("Explain Repair"): Produces structured line and column diagnostics explaining each AST repair action.
+- [x] Automatic Schema Inference: Implemented `schema.InferSchema` and API `POST /api/schemas/infer` to generate standard JSON Schemas from raw JSON with 1-click registration.
+- [x] Prometheus Metrics Exporter: Exposed standard Prometheus text exposition format on `/metrics` for Grafana dashboards.
+- [x] Multi-Provider Dynamic Routing: Support for path prefixes (`/openai/*`, `/anthropic/*`, `/ollama/*`) and dynamic header override `X-SchemaDoctor-Upstream`.
+- [x] Interactive Traffic Simulation in Studio: Built `POST /api/simulate` and "Simulate Traffic" studio control to fire realistic malformed request batches.

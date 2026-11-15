@@ -61,9 +61,22 @@ Proxies requests to the upstream provider while inspecting and healing response 
 Request Headers:
 - `Authorization: Bearer <key>`: Passed transparently to upstream.
 - `X-SchemaDoctor-Target-Schema: <name>`: Optional target schema name for type coercion.
+- `X-SchemaDoctor-Upstream: <url>`: Dynamic upstream host override for this specific request.
+
+Path-Based Multi-Provider Routing:
+- `/openai/*`: Forwards directly to `https://api.openai.com` (e.g. `/openai/v1/chat/completions`).
+- `/anthropic/*`: Forwards directly to `https://api.anthropic.com` (e.g. `/anthropic/v1/messages`).
+- `/ollama/*`: Forwards directly to `http://localhost:11434` (e.g. `/ollama/api/chat`).
+
+Supported Payload Locations:
+- Standard chat completions: `choices[0].message.content`
+- Function calling and tool use: `choices[0].message.tool_calls[i].function.arguments`
+- Streaming tool calls: `choices[0].delta.tool_calls[i].function.arguments`
+- Anthropic message blocks: `content[i].text` and `content[i].input` (for `type: "tool_use"`)
 
 Response Headers added by schemadoctor:
 - `X-SchemaDoctor-Healed: true`: Present when syntax repairs were applied.
+- `X-SchemaDoctor-Location: <content|tool_arguments|anthropic_text|anthropic_tool_input>`: Indicates where the repair was applied.
 - `X-SchemaDoctor-Latency-Us: <int>`: Repair processing latency in microseconds.
 
 ---
@@ -83,6 +96,38 @@ Response:
   "uptime_seconds": 128.4,
   "version": "1.0.0"
 }
+```
+
+### `GET /metrics`
+
+Standard Prometheus text exposition format endpoint for scraping metrics with Prometheus and Grafana.
+
+Example output:
+```
+# HELP schemadoctor_requests_total Total number of requests intercepted by schemadoctor proxy
+# TYPE schemadoctor_requests_total counter
+schemadoctor_requests_total 1420
+
+# HELP schemadoctor_repaired_requests_total Total number of requests healed by schemadoctor
+# TYPE schemadoctor_repaired_requests_total counter
+schemadoctor_repaired_requests_total 380
+
+# HELP schemadoctor_tokens_saved_total Total estimated LLM tokens saved by avoiding API retries
+# TYPE schemadoctor_tokens_saved_total counter
+schemadoctor_tokens_saved_total 133000
+
+# HELP schemadoctor_repair_latency_microseconds Average latency of the AST repair engine in microseconds
+# TYPE schemadoctor_repair_latency_microseconds gauge
+schemadoctor_repair_latency_microseconds 2.650
+
+# HELP schemadoctor_errors_healed_total Cumulative count of syntax errors repaired by error category
+# TYPE schemadoctor_errors_healed_total counter
+schemadoctor_errors_healed_total{type="truncation"} 195
+schemadoctor_errors_healed_total{type="markdown"} 110
+schemadoctor_errors_healed_total{type="quotes"} 45
+schemadoctor_errors_healed_total{type="trailing_comma"} 80
+schemadoctor_errors_healed_total{type="dangling_key"} 18
+schemadoctor_errors_healed_total{type="type_coercion"} 42
 ```
 
 ### `GET /api/stats`
@@ -195,6 +240,52 @@ Request:
     },
     "required": ["order_id", "total"]
   }
+}
+```
+
+### `POST /api/schemas/infer`
+
+Infers a standard JSON Schema from an example JSON payload.
+
+Request:
+```json
+{
+  "input": "{\"user_id\": 101, \"username\": \"alex\", \"roles\": [\"admin\"]}",
+  "title": "UserAccount"
+}
+```
+
+Response:
+```json
+{
+  "title": "UserAccount",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "UserAccount",
+    "type": "object",
+    "properties": {
+      "roles": {
+        "type": "array",
+        "items": {"type": "string"}
+      },
+      "user_id": {"type": "integer"},
+      "username": {"type": "string"}
+    },
+    "required": ["roles", "user_id", "username"]
+  }
+}
+```
+
+### `POST /api/simulate`
+
+Simulates a realistic batch of 5 malformed LLM responses through the proxy telemetry engine.
+
+Response:
+```json
+{
+  "simulated_count": 5,
+  "status": "completed",
+  "message": "Successfully sent 5 simulated malformed requests through proxy telemetry pipeline"
 }
 ```
 

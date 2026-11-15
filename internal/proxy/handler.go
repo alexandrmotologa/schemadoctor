@@ -34,7 +34,7 @@ func NewInterceptor(reg *schema.Registry, store *telemetry.Store, metrics *telem
 }
 
 // RepairRawPayload directly heals a raw JSON string or bytes, optionally coercing against a named schema.
-func (h *Interceptor) RepairRawPayload(raw []byte, schemaName string) ([]byte, ast.RepairFlags, bool, int) {
+func (h *Interceptor) RepairRawPayload(raw []byte, schemaName string) ([]byte, ast.RepairFlags, bool, int, []ast.DiagnosticRecord) {
 	repairRes := ast.Repair(raw)
 
 	coercedCount := 0
@@ -50,7 +50,7 @@ func (h *Interceptor) RepairRawPayload(raw []byte, schemaName string) ([]byte, a
 		}
 	}
 
-	return out, repairRes.Flags, repairRes.Valid, coercedCount
+	return out, repairRes.Flags, repairRes.Valid, coercedCount, repairRes.Diagnostics
 }
 
 // HandleBufferedResponse inspects a buffered HTTP response from an upstream LLM,
@@ -73,42 +73,77 @@ func (h *Interceptor) HandleBufferedResponse(resp *http.Response, targetSchema s
 		return nil
 	}
 
-	choices, ok := chatResp["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
-		// Passthrough without changes
-		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		return nil
+	// Check if this is an OpenAI response or Anthropic response
+	choices, isChoices := chatResp["choices"].([]interface{})
+	anthropicContent, isAnthropic := chatResp["content"].([]interface{})
+
+	var rawTarget string
+	var repairLocation string // "content", "tool_arguments", "anthropic_text", "anthropic_tool_input"
+	var targetToolIndex = -1
+
+	if isChoices && len(choices) > 0 {
+		if firstChoice, ok := choices[0].(map[string]interface{}); ok {
+			if msg, ok := firstChoice["message"].(map[string]interface{}); ok {
+				// Check for tool_calls first
+				if toolCalls, ok := msg["tool_calls"].([]interface{}); ok && len(toolCalls) > 0 {
+					for idx, tc := range toolCalls {
+						if tcMap, ok := tc.(map[string]interface{}); ok {
+							if fn, ok := tcMap["function"].(map[string]interface{}); ok {
+								if args, ok := fn["arguments"].(string); ok && looksLikeJSON(strings.TrimSpace(args)) {
+									rawTarget = args
+									repairLocation = "tool_arguments"
+									targetToolIndex = idx
+									break
+								}
+							}
+						}
+					}
+				}
+
+				// If no tool_calls need repair, check message.content
+				if rawTarget == "" {
+					if content, ok := msg["content"].(string); ok {
+						rawTarget = content
+						repairLocation = "content"
+					}
+				}
+			} else if text, ok := firstChoice["text"].(string); ok {
+				rawTarget = text
+				repairLocation = "text"
+			}
+		}
+	} else if isAnthropic && len(anthropicContent) > 0 {
+		// Inspect Anthropic content blocks
+		for idx, block := range anthropicContent {
+			if bMap, ok := block.(map[string]interface{}); ok {
+				bType, _ := bMap["type"].(string)
+				if bType == "text" {
+					if txt, ok := bMap["text"].(string); ok && looksLikeJSON(strings.TrimSpace(txt)) {
+						rawTarget = txt
+						repairLocation = "anthropic_text"
+						targetToolIndex = idx
+						break
+					}
+				} else if bType == "tool_use" {
+					if inputStr, ok := bMap["input"].(string); ok && looksLikeJSON(strings.TrimSpace(inputStr)) {
+						rawTarget = inputStr
+						repairLocation = "anthropic_tool_input"
+						targetToolIndex = idx
+						break
+					}
+				}
+			}
+		}
 	}
 
-	firstChoice, ok := choices[0].(map[string]interface{})
-	if !ok {
-		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		return nil
-	}
-
-	var rawContent string
-	var isChat = false
-	if msg, ok := firstChoice["message"].(map[string]interface{}); ok {
-		rawContent, _ = msg["content"].(string)
-		isChat = true
-	} else if text, ok := firstChoice["text"].(string); ok {
-		rawContent = text
-	}
-
-	trimmed := strings.TrimSpace(rawContent)
-	if trimmed == "" {
-		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		return nil
-	}
-
-	// Check if content looks like JSON or begins with { or [ or markdown ```
-	if !looksLikeJSON(trimmed) {
+	trimmed := strings.TrimSpace(rawTarget)
+	if trimmed == "" || !looksLikeJSON(trimmed) {
 		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		return nil
 	}
 
 	// Apply AST self-healing repair
-	healedBytes, flags, valid, coercedCount := h.RepairRawPayload([]byte(trimmed), targetSchema)
+	healedBytes, flags, valid, coercedCount, _ := h.RepairRawPayload([]byte(trimmed), targetSchema)
 	latencyUs := time.Since(start).Microseconds()
 	repaired := flags.Any() || coercedCount > 0
 
@@ -160,13 +195,32 @@ func (h *Interceptor) HandleBufferedResponse(resp *http.Response, targetSchema s
 		h.EventBus.Publish(evt)
 	}
 
-	// If repaired, update the response body payload
+	// If repaired, update the response body payload in the exact target location
 	if repaired && valid {
-		if isChat {
+		switch repairLocation {
+		case "tool_arguments":
+			firstChoice := choices[0].(map[string]interface{})
+			msg := firstChoice["message"].(map[string]interface{})
+			toolCalls := msg["tool_calls"].([]interface{})
+			targetCall := toolCalls[targetToolIndex].(map[string]interface{})
+			targetCall["function"].(map[string]interface{})["arguments"] = string(healedBytes)
+
+		case "content":
+			firstChoice := choices[0].(map[string]interface{})
 			msg := firstChoice["message"].(map[string]interface{})
 			msg["content"] = string(healedBytes)
-		} else {
+
+		case "text":
+			firstChoice := choices[0].(map[string]interface{})
 			firstChoice["text"] = string(healedBytes)
+
+		case "anthropic_text":
+			targetBlock := anthropicContent[targetToolIndex].(map[string]interface{})
+			targetBlock["text"] = string(healedBytes)
+
+		case "anthropic_tool_input":
+			targetBlock := anthropicContent[targetToolIndex].(map[string]interface{})
+			targetBlock["input"] = string(healedBytes)
 		}
 
 		newBodyBytes, err := json.Marshal(chatResp)
@@ -175,6 +229,7 @@ func (h *Interceptor) HandleBufferedResponse(resp *http.Response, targetSchema s
 			resp.ContentLength = int64(len(newBodyBytes))
 			resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBodyBytes)))
 			resp.Header.Set("X-SchemaDoctor-Healed", "true")
+			resp.Header.Set("X-SchemaDoctor-Location", repairLocation)
 			resp.Header.Set("X-SchemaDoctor-Latency-Us", fmt.Sprintf("%d", latencyUs))
 			return nil
 		}

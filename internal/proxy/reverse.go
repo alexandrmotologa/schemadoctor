@@ -41,6 +41,7 @@ func NewReverseProxy(upstreamURL string, interceptor *Interceptor) (*ReverseProx
 
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
+			target := rp.resolveTarget(req)
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
 			req.Host = target.Host
@@ -65,12 +66,44 @@ func NewReverseProxy(upstreamURL string, interceptor *Interceptor) (*ReverseProx
 	return rp, nil
 }
 
+func (rp *ReverseProxy) resolveTarget(req *http.Request) *url.URL {
+	// 1. Check custom upstream header
+	if headerUpstream := req.Header.Get("X-SchemaDoctor-Upstream"); headerUpstream != "" {
+		if u, err := url.Parse(headerUpstream); err == nil && u.Scheme != "" && u.Host != "" {
+			return u
+		}
+	}
+
+	// 2. Check path-based routing
+	switch {
+	case strings.HasPrefix(req.URL.Path, "/openai/"):
+		req.URL.Path = strings.TrimPrefix(req.URL.Path, "/openai")
+		if u, err := url.Parse("https://api.openai.com"); err == nil {
+			return u
+		}
+	case strings.HasPrefix(req.URL.Path, "/anthropic/"):
+		req.URL.Path = strings.TrimPrefix(req.URL.Path, "/anthropic")
+		if u, err := url.Parse("https://api.anthropic.com"); err == nil {
+			return u
+		}
+	case strings.HasPrefix(req.URL.Path, "/ollama/"):
+		req.URL.Path = strings.TrimPrefix(req.URL.Path, "/ollama")
+		if u, err := url.Parse("http://localhost:11434"); err == nil {
+			return u
+		}
+	}
+
+	return rp.TargetURL
+}
+
 // ServeHTTP inspects whether request is streaming SSE or buffered JSON and dispatches appropriately.
 func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	targetSchema := r.Header.Get("X-SchemaDoctor-Target-Schema")
 	if targetSchema == "" {
 		targetSchema = r.URL.Query().Get("schema")
 	}
+
+	target := rp.resolveTarget(r)
 
 	// Check if the request body specifies "stream": true
 	isStream := false
@@ -93,7 +126,7 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if isStream {
 		// Forward request to upstream directly via Transport to handle streaming chunks
-		outReq, err := http.NewRequestWithContext(r.Context(), r.Method, rp.TargetURL.ResolveReference(r.URL).String(), bytes.NewReader(bodyBytes))
+		outReq, err := http.NewRequestWithContext(r.Context(), r.Method, target.ResolveReference(r.URL).String(), bytes.NewReader(bodyBytes))
 		if err != nil {
 			http.Error(w, fmt.Sprintf("failed to create upstream request: %v", err), http.StatusInternalServerError)
 			return
@@ -105,7 +138,7 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				outReq.Header.Add(k, v)
 			}
 		}
-		outReq.Host = rp.TargetURL.Host
+		outReq.Host = target.Host
 
 		resp, err := rp.Transport.RoundTrip(outReq)
 		if err != nil {

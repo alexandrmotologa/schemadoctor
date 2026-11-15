@@ -3,6 +3,7 @@ package ast
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -50,19 +51,30 @@ func (f RepairFlags) Summary() string {
 	return strings.Join(active, ", ")
 }
 
+// DiagnosticRecord provides a structured audit trail explaining an individual repair.
+type DiagnosticRecord struct {
+	Line        int    `json:"line"`
+	Column      int    `json:"column"`
+	Rule        string `json:"rule"`
+	Description string `json:"description"`
+	Snippet     string `json:"snippet,omitempty"`
+}
+
 // RepairResult encapsulates the healed output and its diagnostic flags.
 type RepairResult struct {
-	Original []byte
-	Repaired []byte
-	Flags    RepairFlags
-	Valid    bool
+	Original    []byte             `json:"original"`
+	Repaired    []byte             `json:"repaired"`
+	Flags       RepairFlags        `json:"flags"`
+	Valid       bool               `json:"valid"`
+	Diagnostics []DiagnosticRecord `json:"diagnostics,omitempty"`
 }
 
 // Repair takes potentially malformed JSON bytes from an LLM and deterministically heals syntax errors.
 func Repair(input []byte) RepairResult {
 	res := RepairResult{
-		Original: input,
-		Flags:    RepairFlags{},
+		Original:    input,
+		Flags:       RepairFlags{},
+		Diagnostics: []DiagnosticRecord{},
 	}
 
 	// If input is already strictly valid JSON, return immediately
@@ -76,6 +88,12 @@ func Repair(input []byte) RepairResult {
 	stripped := StripMarkdownAndChatter(input)
 	if len(stripped) != len(input) {
 		res.Flags.StrippedMarkdown = true
+		res.Diagnostics = append(res.Diagnostics, DiagnosticRecord{
+			Line:        1,
+			Column:      1,
+			Rule:        "stripped_markdown",
+			Description: "Removed conversational preamble or markdown code fence",
+		})
 	}
 
 	// Quick check if stripped version is now valid JSON
@@ -86,13 +104,14 @@ func Repair(input []byte) RepairResult {
 	}
 
 	// 2. Tokenize and reconstruct with stack tracking
-	healed, flags := reconstruct(stripped)
+	healed, flags, diags := reconstruct(stripped)
 	res.Flags.ClosedOpenString = res.Flags.ClosedOpenString || flags.ClosedOpenString
 	res.Flags.BalancedDelimiters = res.Flags.BalancedDelimiters || flags.BalancedDelimiters
 	res.Flags.RemovedTrailingComma = res.Flags.RemovedTrailingComma || flags.RemovedTrailingComma
 	res.Flags.CompletedDanglingKey = res.Flags.CompletedDanglingKey || flags.CompletedDanglingKey
 	res.Flags.NormalizedIdent = res.Flags.NormalizedIdent || flags.NormalizedIdent
 	res.Flags.FixedUnescapedQuote = res.Flags.FixedUnescapedQuote || flags.FixedUnescapedQuote
+	res.Diagnostics = append(res.Diagnostics, diags...)
 
 	// 3. Final validation check
 	res.Repaired = healed
@@ -101,8 +120,9 @@ func Repair(input []byte) RepairResult {
 	return res
 }
 
-func reconstruct(src []byte) ([]byte, RepairFlags) {
+func reconstruct(src []byte) ([]byte, RepairFlags, []DiagnosticRecord) {
 	flags := RepairFlags{}
+	var diags []DiagnosticRecord
 	var out bytes.Buffer
 	out.Grow(len(src) + 64)
 
@@ -112,7 +132,8 @@ func reconstruct(src []byte) ([]byte, RepairFlags) {
 	// State tracking:
 	// lastMeaningfulToken: the token right before current
 	var lastType TokenType = TokenUnknown
-	expectingValue := false // after colon or at start of element
+	var lastOffset = 0
+	var expectingValue = false
 
 	for {
 		tok := lexer.Next()
@@ -120,166 +141,261 @@ func reconstruct(src []byte) ([]byte, RepairFlags) {
 			break
 		}
 
+		line, col := computeLineCol(src, tok.Offset)
+
 		switch tok.Type {
 		case TokenOpenBrace:
 			out.WriteByte('{')
 			stack.Push(DelimObject)
 			lastType = TokenOpenBrace
-			expectingValue = false
+			lastOffset = tok.Offset
 
 		case TokenCloseBrace:
 			// If preceding token was a comma, trailing comma was written to out; strip it
 			if lastType == TokenComma {
 				trimTrailingComma(&out)
 				flags.RemovedTrailingComma = true
+				prevLine, prevCol := computeLineCol(src, lastOffset)
+				diags = append(diags, DiagnosticRecord{
+					Line:        prevLine,
+					Column:      prevCol,
+					Rule:        "trailing_comma",
+					Description: "Dropped trailing comma before closing brace '}'",
+				})
 			} else if lastType == TokenColon {
 				out.WriteString("null")
 				flags.CompletedDanglingKey = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "dangling_key",
+					Description: "Inserted null for key missing value before '}'",
+				})
 			}
 			out.WriteByte('}')
 			stack.Pop()
 			lastType = TokenCloseBrace
+			lastOffset = tok.Offset
 			expectingValue = false
 
 		case TokenOpenBracket:
 			out.WriteByte('[')
 			stack.Push(DelimArray)
 			lastType = TokenOpenBracket
+			lastOffset = tok.Offset
 			expectingValue = true
 
 		case TokenCloseBracket:
 			if lastType == TokenComma {
 				trimTrailingComma(&out)
 				flags.RemovedTrailingComma = true
+				prevLine, prevCol := computeLineCol(src, lastOffset)
+				diags = append(diags, DiagnosticRecord{
+					Line:        prevLine,
+					Column:      prevCol,
+					Rule:        "trailing_comma",
+					Description: "Dropped trailing comma before closing bracket ']'",
+				})
 			} else if lastType == TokenColon {
 				out.WriteString("null")
 				flags.CompletedDanglingKey = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "dangling_key",
+					Description: "Inserted null for key missing value before ']'",
+				})
 			}
 			out.WriteByte(']')
 			stack.Pop()
 			lastType = TokenCloseBracket
+			lastOffset = tok.Offset
 			expectingValue = false
 
 		case TokenColon:
-			// If preceding token was a comma or colon, handle gracefully
 			out.WriteByte(':')
 			lastType = TokenColon
+			lastOffset = tok.Offset
 			expectingValue = true
 
 		case TokenComma:
-			// Avoid double commas (,,)
 			if lastType == TokenComma || lastType == TokenOpenBrace || lastType == TokenOpenBracket {
-				// skip duplicate or invalid comma
 				flags.RemovedTrailingComma = true
 				continue
 			}
-			if lastType == TokenColon {
-				// Dangling key: "foo":,
+			if lastType == TokenColon || (expectingValue && lastType == TokenColon) {
 				out.WriteString("null")
 				flags.CompletedDanglingKey = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "dangling_key",
+					Description: "Inserted null for dangling key before comma",
+				})
 			}
 			out.WriteByte(',')
 			lastType = TokenComma
+			lastOffset = tok.Offset
 			expectingValue = false
 
 		case TokenString:
 			formattedStr, closed, fixedQuote := normalizeString(tok.Raw)
 			if closed {
 				flags.ClosedOpenString = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "unterminated_string",
+					Description: "Closed unterminated string literal with double quote",
+				})
 			}
 			if fixedQuote {
 				flags.FixedUnescapedQuote = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "unescaped_quote",
+					Description: "Escaped unescaped double quote inside string value",
+				})
 			}
 			out.Write(formattedStr)
 			lastType = TokenString
+			lastOffset = tok.Offset
 			expectingValue = false
 
 		case TokenNumber:
 			out.Write(tok.Raw)
 			lastType = tok.Type
+			lastOffset = tok.Offset
 			expectingValue = false
 
 		case TokenTrue:
 			if !bytes.Equal(tok.Raw, []byte("true")) {
 				flags.NormalizedIdent = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "python_literal",
+					Description: fmt.Sprintf("Normalized '%s' to JSON 'true'", string(tok.Raw)),
+				})
 			}
 			out.WriteString("true")
 			lastType = TokenTrue
+			lastOffset = tok.Offset
 			expectingValue = false
 
 		case TokenFalse:
 			if !bytes.Equal(tok.Raw, []byte("false")) {
 				flags.NormalizedIdent = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "python_literal",
+					Description: fmt.Sprintf("Normalized '%s' to JSON 'false'", string(tok.Raw)),
+				})
 			}
 			out.WriteString("false")
 			lastType = TokenFalse
+			lastOffset = tok.Offset
 			expectingValue = false
 
 		case TokenNull:
 			if !bytes.Equal(tok.Raw, []byte("null")) {
 				flags.NormalizedIdent = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "python_literal",
+					Description: fmt.Sprintf("Normalized '%s' to JSON 'null'", string(tok.Raw)),
+				})
 			}
 			out.WriteString("null")
 			lastType = TokenNull
+			lastOffset = tok.Offset
 			expectingValue = false
 
 		case TokenIdentifier:
-			// Unquoted identifier or Python constant
 			lower := bytes.ToLower(tok.Raw)
 			switch {
 			case bytes.Equal(lower, []byte("true")):
 				out.WriteString("true")
 				flags.NormalizedIdent = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "python_literal",
+					Description: "Normalized identifier to boolean true",
+				})
 				lastType = TokenTrue
 			case bytes.Equal(lower, []byte("false")):
 				out.WriteString("false")
 				flags.NormalizedIdent = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "python_literal",
+					Description: "Normalized identifier to boolean false",
+				})
 				lastType = TokenFalse
 			case bytes.Equal(lower, []byte("none")) || bytes.Equal(lower, []byte("null")):
 				out.WriteString("null")
 				flags.NormalizedIdent = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "python_literal",
+					Description: "Normalized 'None' to JSON 'null'",
+				})
 				lastType = TokenNull
 			default:
-				// If expecting a key or at root object, quote it as a string
-				top, inScope := stack.Peek()
-				if inScope && top == DelimObject && !expectingValue {
-					out.WriteByte('"')
-					out.Write(tok.Raw)
-					out.WriteByte('"')
-					flags.NormalizedIdent = true
-					lastType = TokenString
-				} else {
-					// Coerce unknown ident as string value
-					out.WriteByte('"')
-					out.Write(tok.Raw)
-					out.WriteByte('"')
-					flags.NormalizedIdent = true
-					lastType = TokenString
-				}
+				out.WriteByte('"')
+				out.Write(tok.Raw)
+				out.WriteByte('"')
+				flags.NormalizedIdent = true
+				diags = append(diags, DiagnosticRecord{
+					Line:        line,
+					Column:      col,
+					Rule:        "unquoted_identifier",
+					Description: fmt.Sprintf("Quoted bare identifier '%s'", string(tok.Raw)),
+				})
+				lastType = TokenString
 			}
+			lastOffset = tok.Offset
 			expectingValue = false
 
 		default:
-			// Unknown byte, skip or write if safe
 		}
 	}
 
 	// Stream cut off or unexpected EOF!
-	// 1. If last token was a trailing comma, remove it
 	if lastType == TokenComma {
 		trimTrailingComma(&out)
 		flags.RemovedTrailingComma = true
+		l, c := computeLineCol(src, lastOffset)
+		diags = append(diags, DiagnosticRecord{
+			Line:        l,
+			Column:      c,
+			Rule:        "trailing_comma",
+			Description: "Trimmed trailing comma before stream EOF",
+		})
 	}
 
-	// 2. If last token was a colon (dangling key), inject null
-	if lastType == TokenColon {
+	if lastType == TokenColon || (expectingValue && lastType == TokenColon) {
 		out.WriteString("null")
 		flags.CompletedDanglingKey = true
+		l, c := computeLineCol(src, lastOffset)
+		diags = append(diags, DiagnosticRecord{
+			Line:        l,
+			Column:      c,
+			Rule:        "dangling_key",
+			Description: "Completed dangling key with null at stream EOF",
+		})
 	}
 
-	// 3. Close open delimiters in reverse stack order
+	// Close open delimiters in reverse stack order
 	if stack.Len() > 0 {
 		flags.BalancedDelimiters = true
+		var closing bytes.Buffer
 		for {
 			delim, ok := stack.Pop()
 			if !ok {
@@ -287,13 +403,39 @@ func reconstruct(src []byte) ([]byte, RepairFlags) {
 			}
 			if delim == DelimObject {
 				out.WriteByte('}')
+				closing.WriteByte('}')
 			} else if delim == DelimArray {
 				out.WriteByte(']')
+				closing.WriteByte(']')
 			}
 		}
+		l, c := computeLineCol(src, len(src))
+		diags = append(diags, DiagnosticRecord{
+			Line:        l,
+			Column:      c,
+			Rule:        "delimiter_balance",
+			Description: fmt.Sprintf("Appended closing delimiters '%s' for truncated structure", closing.String()),
+		})
 	}
 
-	return out.Bytes(), flags
+	return out.Bytes(), flags, diags
+}
+
+func computeLineCol(src []byte, offset int) (int, int) {
+	if offset > len(src) {
+		offset = len(src)
+	}
+	line := 1
+	col := 1
+	for i := 0; i < offset; i++ {
+		if src[i] == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+	}
+	return line, col
 }
 
 // CalculateClosingSuffix determines the exact characters required to close an incomplete JSON stream at EOF.
