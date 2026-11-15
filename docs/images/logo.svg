@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <clipPath id="squircle-clip">
+      <rect x="24" y="24" width="976" height="976" rx="220" />
+    </clipPath>
+
+    <linearGradient id="cyan-glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f5ff"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <linearGradient id="amber-beak" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+
+    <linearGradient id="slate-plate-l" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#475569"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+
+    <linearGradient id="slate-plate-r" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#334155"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+
+    <filter id="subtle-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.14" />
+    </filter>
+  </defs>
+
+  <!-- Luxury White Squircle Container -->
+  <rect x="24" y="24" width="976" height="976" rx="220" fill="#ffffff" stroke="#e2e8f0" stroke-width="6" />
+
+  <g clip-path="url(#squircle-clip)">
+    <g transform="translate(512, 512)" filter="url(#subtle-shadow)">
+
+      <!-- Hexagonal Gateway Frame -->
+      <polygon points="
+        0,-390
+        338,-195
+        338,195
+        0,390
+        -338,195
+        -338,-195
+      " fill="none" stroke="#0f172a" stroke-width="36" stroke-linejoin="round" />
+
+      <polygon points="
+        0,-355
+        307,-177
+        307,177
+        0,355
+        -307,177
+        -307,-177
+      " fill="none" stroke="#00f5ff" stroke-width="4" opacity="0.45" stroke-dasharray="16, 12" />
+
+      <!-- Symmetrical Sentinel Owl Mascot (The Syntax Doctor) -->
+
+      <!-- 1. Watertight Solid Base Silhouette -->
+      <path d="
+        M 0, -290
+        L 80, -285
+        L 180, -320
+        L 165, -180
+        L 230, -70
+        L 245, 80
+        L 180, 220
+        L 110, 285
+        L 0, 310
+        L -110, 285
+        L -180, 220
+        L -245, 80
+        L -230, -70
+        L -165, -180
+        L -180, -320
+        L -80, -285
+        Z
+      " fill="#0b0f19" stroke="#0f172a" stroke-width="8" stroke-linejoin="round" />
+
+      <!-- 2. Low-Poly Ear Tufts / Crest Horns -->
+      <!-- Left Tuft -->
+      <polygon points="-80,-285 -180,-320 -140,-220" fill="#1e293b" />
+      <polygon points="-140,-220 -180,-320 -165,-180" fill="#0f172a" />
+      <!-- Right Tuft -->
+      <polygon points="80,-285 180,-320 140,-220" fill="#334155" />
+      <polygon points="140,-220 180,-320 165,-180" fill="#1e293b" />
+
+      <!-- 3. Central Forehead & Crown Facets -->
+      <polygon points="0,-290 -80,-285 -60,-200 0,-180" fill="#334155" />
+      <polygon points="0,-290 80,-285 60,-200 0,-180" fill="#475569" />
+      <polygon points="-60,-200 -140,-220 -110,-140 0,-130" fill="#1e293b" />
+      <polygon points="60,-200 140,-220 110,-140 0,-130" fill="#334155" />
+
+      <!-- 4. Supraorbital Diagnostic Brow Ridges -->
+      <polygon points="0,-130 -110,-140 -160,-70 -50,-60" fill="#0f172a" stroke="#00f5ff" stroke-width="1.5" stroke-opacity="0.4" />
+      <polygon points="0,-130 110,-140 160,-70 50,-60" fill="#1e293b" stroke="#00f5ff" stroke-width="1.5" stroke-opacity="0.4" />
+
+      <!-- 5. Diagnostic Laser Optics (Eyes) -->
+      <!-- Left Eye Socket & Sclera -->
+      <polygon points="-145,-68 -55,-60 -75,-15 -140,-35" fill="#090d16" />
+      <polygon points="-135,-60 -65,-55 -80,-22 -130,-38" fill="url(#cyan-glow)" />
+      <!-- Left Pupil & Focus Glint -->
+      <polygon points="-108,-56 -92,-54 -95,-28 -105,-30" fill="#0b0f19" />
+      <polygon points="-102,-52 -96,-50 -98,-38 -104,-39" fill="#ffffff" opacity="0.9" />
+
+      <!-- Right Eye Socket & Sclera -->
+      <polygon points="145,-68 55,-60 75,-15 140,-35" fill="#090d16" />
+      <polygon points="135,-60 65,-55 80,-22 130,-38" fill="url(#cyan-glow)" />
+      <!-- Right Pupil & Focus Glint -->
+      <polygon points="108,-56 92,-54 95,-28 105,-30" fill="#0b0f19" />
+      <polygon points="102,-52 96,-50 98,-38 104,-39" fill="#ffffff" opacity="0.9" />
+
+      <!-- 6. Geometric Surgical Beak -->
+      <polygon points="0,-75 -25,-40 0,35" fill="#f59e0b" />
+      <polygon points="0,-75 25,-40 0,35" fill="#d97706" />
+      <polygon points="-25,-40 0,35 -15,55 0,65" fill="#b45309" />
+      <polygon points="25,-40 0,35 15,55 0,65" fill="#92400e" />
+
+      <!-- 7. Lateral Facial Disc Plates -->
+      <polygon points="-165,-180 -230,-70 -170,-10 -160,-70" fill="#1e293b" />
+      <polygon points="165,-180 230,-70 170,-10 160,-70" fill="#334155" />
+      <polygon points="-230,-70 -245,80 -170,75 -170,-10" fill="#0f172a" />
+      <polygon points="230,-70 245,80 170,75 170,-10" fill="#1e293b" />
+
+      <!-- 8. Muzzle & Whisker Disc (Refined Slate/Titanium, Zero Buck-Teeth) -->
+      <polygon points="0,65 -50,-10 -90,45 -55,100" fill="#334155" />
+      <polygon points="0,65 50,-10 90,45 55,100" fill="#475569" />
+      <polygon points="0,65 -55,100 0,135" fill="#1e293b" />
+      <polygon points="0,65 55,100 0,135" fill="#334155" />
+
+      <!-- 9. Breastplate Chevron Armor (Descending Low-Poly Facets) -->
+      <polygon points="0,135 -75,120 -110,185 0,225" fill="#1e293b" />
+      <polygon points="0,135 75,120 110,185 0,225" fill="#334155" />
+
+      <polygon points="-75,120 -170,75 -180,165 -110,185" fill="#0f172a" />
+      <polygon points="75,120 170,75 180,165 110,185" fill="#1e293b" />
+
+      <polygon points="-170,75 -245,80 -210,195 -180,165" fill="#0b0f19" />
+      <polygon points="170,75 245,80 210,195 180,165" fill="#111827" />
+
+      <!-- Lower Torso Seal Plate -->
+      <polygon points="0,225 -110,185 -180,220 -80,275 0,295" fill="#0f172a" />
+      <polygon points="0,225 110,185 180,220 80,275 0,295" fill="#1e293b" />
+      <polygon points="-80,275 0,295 80,275 0,310" fill="url(#cyan-glow)" opacity="0.85" />
+
+    </g>
+  </g>
+</svg>

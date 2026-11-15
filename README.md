@@ -1,8 +1,25 @@
-# schemadoctor
+<p align="center">
+  <img src="docs/images/logo.png?raw=true" alt="schemadoctor Logo" width="130" style="border-radius: 24px;" />
+</p>
+<h1 align="center">schemadoctor</h1>
 
-Zero-latency streaming JSON self-healing proxy and incremental AST repair engine for LLMs and local SLMs.
+<p align="center">
+  <strong>Zero-latency streaming JSON self-healing reverse proxy and incremental AST repair engine for LLMs and local SLMs.</strong>
+</p>
 
-schemadoctor intercepts responses from language model APIs (OpenAI, Anthropic, Ollama, vLLM) and repairs malformed, truncated, or invalid JSON on the wire in sub-millisecond time. It prevents client parser crashes and eliminates expensive API retry calls.
+<p align="center">
+  <img src="https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go" alt="Go Version" />
+  <img src="https://img.shields.io/badge/React-19.0-61DAFB?style=flat-square&logo=react" alt="React 19" />
+  <img src="https://img.shields.io/badge/SQLite-Pure--Go-003B57?style=flat-square&logo=sqlite" alt="SQLite" />
+  <img src="https://img.shields.io/badge/Wire%20Latency-%3C%200.004ms-brightgreen?style=flat-square" alt="Wire Latency" />
+  <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License" />
+</p>
+
+<p align="center">
+  <img src="docs/images/schemadoctor_demo.gif?raw=true" alt="schemadoctor Real-Time Interception and Self-Healing Demo" width="100%" />
+</p>
+
+schemadoctor intercepts HTTP and Server-Sent Events (SSE) responses from language model APIs (OpenAI, Anthropic, Ollama, vLLM) and repairs malformed, truncated, or invalid JSON on the wire in sub-millisecond time. It prevents client parser crashes and eliminates expensive API retry calls.
 
 ## Problem
 
@@ -217,13 +234,32 @@ Environment variables:
 
 ## Embedded React 19 Studio
 
-When `schemadoctor serve` is active, open `http://localhost:4141` in a browser to access:
+schemadoctor bundles a self-contained React 19 dashboard served directly from memory by the Go binary. Open `http://localhost:4141` to inspect live traffic, benchmark AST repair latency, and test custom schemas.
 
-- Real-Time Monitor: Request volume counters, syntax repair success rate, estimated tokens saved, and average wire latency.
-- Live Stream Table: Live stream of requests passing through the proxy with latency meters and applied repair tags.
-- Diff Viewer: Side-by-side colorized diff comparing raw malformed LLM outputs to healed JSON.
-- Interactive Playground: Web sandbox with preloaded failure presets to test repairs and inspect AST token changes.
-- Schema Registry: Add and validate JSON Schemas used for type coercion.
+### Live Monitor (Desktop)
+
+Inspect real-time request volume, repair success rate, estimated token savings, and live LLM stream traces.
+
+<p align="center">
+  <img src="docs/images/dashboard_desktop.png?raw=true" alt="schemadoctor Desktop Live Monitor" width="100%" />
+</p>
+
+### Responsive Multi-Device Support (Tablet & Mobile)
+
+The studio adapts to desktop, tablet, and mobile viewport sizes:
+
+<p align="center">
+  <img src="docs/images/dashboard_tablet.png?raw=true" alt="schemadoctor Tablet View" width="48%" />
+  <img src="docs/images/dashboard_mobile.png?raw=true" alt="schemadoctor Mobile View" width="48%" />
+</p>
+
+### Interactive Playground & Lexical Audit Trail
+
+Test damaged JSON snippets against candidate schemas and inspect line-by-line AST corrections with exact token offsets:
+
+<p align="center">
+  <img src="docs/images/playground_diff.png?raw=true" alt="schemadoctor Interactive Playground and Lexical Audit Trail" width="100%" />
+</p>
 
 ## Documentation
 
