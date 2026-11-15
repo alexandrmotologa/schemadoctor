@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UserProfile",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Full name of the user"
+    },
+    "age": {
+      "type": "integer",
+      "description": "Age in completed years"
+    },
+    "score": {
+      "type": "number",
+      "description": "Accuracy score"
+    },
+    "active": {
+      "type": "boolean",
+      "description": "Current active account status"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Assigned skill tags"
+    }
+  },
+  "required": ["name", "age"]
+}

@@ -1,0 +1,11 @@
+Here is the JSON payload you requested:
+
+```json
+{
+  "service": "billing-pipeline",
+  "active": True,
+  "endpoints": ["/invoices", "/charges", ],
+}
+```
+
+Please feel free to ask if you need further adjustments.

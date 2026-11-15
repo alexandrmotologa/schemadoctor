@@ -1,0 +1,34 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/schemadoctor
+
+# Go
+vendor/
+*.test
+*.out
+go.work
+
+# Node / Web
+node_modules/
+web/node_modules/
+.npm
+*.log
+
+# Databases & local data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,15 @@
+server:
+  proxy_port: 8080
+  studio_port: 4141
+  host: "0.0.0.0"
+
+upstream:
+  url: "https://api.openai.com"
+  timeout_seconds: 60
+  mock_upstream: false
+
+database:
+  path: "data/schemadoctor.db"
+
+schemas:
+  directory: "schemas"
